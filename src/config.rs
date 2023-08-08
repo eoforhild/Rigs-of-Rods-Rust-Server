@@ -104,6 +104,15 @@ impl Config {
     pub fn get_show_version(&self) -> bool { self.s_show_version }
     pub fn get_server_mode(&self) -> &ServerType { &self.s_server_mode }
     pub fn get_ip_addr(&self) -> &str { &self.s_ip_addr }
+    pub fn get_listen_port(&self) -> &u32 { &self.s_listen_port }
+    pub fn get_server_name(&self) -> &str { &self.s_server_name }
+    pub fn get_terrain_name(&self) -> &str { &self.s_terrain_name }
+    pub fn get_max_clients(&self) -> &u32 { &self.s_max_clients }
+    pub fn get_public_pw(&self) -> &str { &self.s_public_password }
+    pub fn get_serverlist_path(&self) -> &str { &self.s_serverlist_path }
+    pub fn get_serverlist_host(&self) -> &str { &self.s_serverlist_host }
+    
+    pub fn is_public(&self) -> bool { !&self.get_public_pw().is_empty() }
 
     pub fn show_help(&self) {
         println!(                
