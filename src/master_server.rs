@@ -21,6 +21,7 @@ impl Client {
         }
     }
 
+    // Registers server on the server list
     pub fn register(&self) -> bool {
         let mut data = HashMap::new();
         let conf: &Config = unsafe { CONF.as_ref().unwrap() };
@@ -41,7 +42,22 @@ impl Client {
         logger::log(LogLevel::Info, 
             &format!("Attempting to register on serverlist {}", m_server_path));
         
-        
+        (response, status) = self.http_request(Method::, data);
+        match status {
+            StatusCode => // secondary match for status code?,
+            Error => // error lmao,
+        }
+
+        // if success
+        // parse response json
+        if (todo!() /* fail condition */) {
+            logger::log(LogLevel::Error,
+                "registration failed, invalid server response (JSON parsing failed)");
+            // log debug raw response
+            return false;
+        }
+
+        // set trust_level and token based on response from server
         true
     }
 
@@ -51,6 +67,8 @@ impl Client {
 
     // Change user_list to utilize json
     pub fn send_heartbeat(&self, user_list: &str) -> bool {
+        // heartbeat consists of putting a json to the server with
+        // challenge = self.m_token and users = user_list
         todo!()
     }
 
@@ -58,6 +76,7 @@ impl Client {
 
     pub fn get_trust_level(&self) -> i32 { self.m_trust_level }
 
+    // change to return tuple (response, StatusCode)
     async fn http_request(
         &self, 
         method: Method, 
@@ -71,6 +90,6 @@ impl Client {
             .send()
             .await?;
 
-        res.status()
+        
     }
 }
