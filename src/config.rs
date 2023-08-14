@@ -51,9 +51,9 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            s_server_name: Default::default(),
+            s_server_name: String::from("rust server test"),
             s_terrain_name: String::from("any"),
-            s_public_password: Default::default(),
+            s_public_password: String::from("colonthree"),
             s_scriptname: Default::default(),
             s_authfile: String::from("server.auth"),
             s_motdfile: String::from("server.motd"),
@@ -64,10 +64,10 @@ impl Default for Config {
             s_irc: Default::default(),
             s_voip: Default::default(),
             s_serverlist_host: String::from("api.rigsofrods.org"),
-            s_serverlist_path: String::from(""),
+            s_serverlist_path: String::from("api.rigsofrods.org"),
             s_resourcedir: String::from(""),
 
-            s_server_mode: ServerType::Auto,
+            s_server_mode: ServerType::Inet,
             s_ip_addr: String::from("0.0.0.0"),
             s_listen_port: 0,
             s_max_clients: 16,
@@ -111,6 +111,10 @@ impl Config {
     pub fn get_public_pw(&self) -> &str { &self.s_public_password }
     pub fn get_serverlist_path(&self) -> &str { &self.s_serverlist_path }
     pub fn get_serverlist_host(&self) -> &str { &self.s_serverlist_host }
+
+    pub fn set_ip_addr(&mut self, ip: &str) {
+        self.s_ip_addr = ip.to_string();
+    }
     
     pub fn is_public(&self) -> bool { !&self.get_public_pw().is_empty() }
 

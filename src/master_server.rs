@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use reqwest::{Method, StatusCode};
+use futures::executor::block_on;
+use reqwest::{Method, StatusCode, Response, Error};
 
 use crate::config::{Config, CONF};
-use crate::logger::{LogLevel,  self};
+use crate::logger::{LogLevel, self};
 
 struct Client {
     m_token: Option<String>,
@@ -22,40 +23,49 @@ impl Client {
     }
 
     // Registers server on the server list
-    pub fn register(&self) -> bool {
+    pub fn register(&mut self) -> bool {
         let mut data = HashMap::new();
         let conf: &Config = unsafe { CONF.as_ref().unwrap() };
 
         let port = conf.get_listen_port().to_string();
         let max_clients = conf.get_max_clients().to_string();
+        let password = (conf.is_public() as u32).to_string();
+
         data.insert("ip", conf.get_ip_addr());
         data.insert("port", &port);
         data.insert("name", conf.get_server_name());
         data.insert("terrain-name", conf.get_terrain_name());
         data.insert("max-clients", &max_clients);
         data.insert("version", "RoRnet_2.44");
-        data.insert("use-password", &(conf.is_public() as u32).to_string());
+        data.insert("use-password", &password);
 
-        let m_server_path: String = String::from("/") + 
-            conf.get_serverlist_path() + "/server-list";
+        self.m_server_path = Some(format!("https://{}/server-list", conf.get_serverlist_path()));
         
+        // Attempt to register onto the server list
         logger::log(LogLevel::Info, 
-            &format!("Attempting to register on serverlist {}", m_server_path));
-        
-        (response, status) = self.http_request(Method::, data);
-        match status {
-            StatusCode => // secondary match for status code?,
-            Error => // error lmao,
+            &format!("Attempting to register on serverlist {}", self.m_server_path.as_ref().unwrap()));
+        let response = match block_on(self.http_request(Method::POST, data)) {
+            Ok(res) => res,
+            Err(err) => {
+                logger::log(LogLevel::Error, &err.to_string());
+                return false
+            },
+        };
+        let stat_code = response.status().as_u16();
+        if stat_code != 200 {
+            logger::log(LogLevel::Error, 
+                &format!("Registration failed, server responded with code {}", stat_code));
+            return false;
         }
 
         // if success
         // parse response json
-        if (todo!() /* fail condition */) {
-            logger::log(LogLevel::Error,
-                "registration failed, invalid server response (JSON parsing failed)");
-            // log debug raw response
-            return false;
-        }
+        // if (todo!() /* fail condition */) {
+        //     logger::log(LogLevel::Error,
+        //         "registration failed, invalid server response (JSON parsing failed)");
+        //     // log debug raw response
+        //     return false;
+        // }
 
         // set trust_level and token based on response from server
         true
@@ -81,15 +91,27 @@ impl Client {
         &self, 
         method: Method, 
         payload: HashMap<&str, &str>,
-    ) -> Result<StatusCode, Error>{
-        let conf = unsafe { CONF.as_ref().unwrap() };
+    ) -> Result<Response, Error> {
         let client = reqwest::Client::new();
-        let res = client
-            .request(method, conf.get_serverlist_host())
+        let res: Response = client
+            .request(method, self.m_server_path.as_ref().unwrap())
             .json(&payload)
             .send()
             .await?;
 
-        
+        Ok(res)
     }
+}
+
+pub async unsafe fn retrieve_public_ip() -> Result<(), Error> {
+    let conf: &mut Config = CONF.as_mut().unwrap() ;
+    let client = reqwest::Client::new();
+    let url: String = format!("https://{}/get-public-ip", conf.get_serverlist_path());
+    let ip = client.get(url).send()
+        .await?
+        .text()
+        .await?;
+
+    conf.set_ip_addr(&ip);
+    Ok(())
 }
