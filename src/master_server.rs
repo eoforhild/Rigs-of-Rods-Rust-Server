@@ -5,7 +5,7 @@ use reqwest::{Method, StatusCode, Response, Error};
 use crate::config::{Config, CONF};
 use crate::logger::{LogLevel, self};
 
-struct Client {
+pub struct Client {
     m_token: Option<String>,
     m_trust_level: i32,
     m_is_registered: bool,
@@ -22,9 +22,9 @@ impl Client {
         }
     }
 
-    // Registers server on the server list
+    /// Registers server on the server list
     pub fn register(&mut self) -> bool {
-        let mut data = HashMap::new();
+        let mut data: HashMap<&str, &str> = HashMap::new();
         let conf: &Config = unsafe { CONF.as_ref().unwrap() };
 
         let port = conf.get_listen_port().to_string();
@@ -39,7 +39,7 @@ impl Client {
         data.insert("version", "RoRnet_2.44");
         data.insert("use-password", &password);
 
-        self.m_server_path = Some(format!("https://{}/server-list", conf.get_serverlist_path()));
+        self.m_server_path = Some(format!("{}/server-list", conf.get_serverlist_path()));
         
         // Attempt to register onto the server list
         logger::log(LogLevel::Info, 
@@ -52,11 +52,21 @@ impl Client {
             },
         };
         let stat_code = response.status().as_u16();
+        let parsed: String = match block_on(response.text()) {
+            Ok(res) => res,
+            Err(_) => {
+                logger::log(LogLevel::Error, "uh oh stinky...");
+                return false;
+            },
+        };
         if stat_code != 200 {
             logger::log(LogLevel::Error, 
                 &format!("Registration failed, server responded with code {}", stat_code));
+            logger::log(LogLevel::Debug, &parsed);
             return false;
         }
+
+        
 
         // if success
         // parse response json
@@ -86,31 +96,31 @@ impl Client {
 
     pub fn get_trust_level(&self) -> i32 { self.m_trust_level }
 
-    // change to return tuple (response, StatusCode)
     async fn http_request(
         &self, 
         method: Method, 
         payload: HashMap<&str, &str>,
     ) -> Result<Response, Error> {
-        let client = reqwest::Client::new();
+        let client: reqwest::Client = reqwest::Client::new();
         let res: Response = client
             .request(method, self.m_server_path.as_ref().unwrap())
             .json(&payload)
-            .send()
-            .await?;
+            .send().await?;
 
         Ok(res)
     }
 }
 
+/// Retrieves public ip of the computer hosting this server
+/// and mutates the global config accordingly to this new ip.
 pub async unsafe fn retrieve_public_ip() -> Result<(), Error> {
     let conf: &mut Config = CONF.as_mut().unwrap() ;
-    let client = reqwest::Client::new();
-    let url: String = format!("https://{}/get-public-ip", conf.get_serverlist_path());
-    let ip = client.get(url).send()
-        .await?
-        .text()
-        .await?;
+    let client: reqwest::Client = reqwest::Client::new();
+    let url: String = format!("{}/get-public-ip", conf.get_serverlist_path());
+    let ip: String = client
+        .get(url)
+        .send().await?
+        .text().await?;
 
     conf.set_ip_addr(&ip);
     Ok(())
