@@ -93,15 +93,49 @@ impl Client {
         }
     }
 
-    pub fn unregister(&self) -> bool {
-        todo!()
+    pub fn unregister(&mut self) -> bool {
+        assert_eq!(self.m_is_registered, true);
+
+        let data: Value = json!({
+            "challenge": self.m_token.as_ref().unwrap()
+        });
+
+        let stat_code: u16 = match block_on(self.http_request(Method::DELETE, data)) {
+            Ok(res) => res.status().as_u16(),
+            Err(err) => {
+                logger::log(LogLevel::Error, &err.to_string());
+                return false
+            },
+        };
+        if stat_code != 200 {
+            logger::log(LogLevel::Error, 
+                &format!("Failed to unregister server with code HTTP {}", stat_code));
+            return false;
+        }
+
+        self.m_is_registered = false;
+        true
     }
 
-    // Change user_list to utilize json
-    pub fn send_heartbeat(&self, user_list: &str) -> bool {
-        // heartbeat consists of putting a json to the server with
-        // challenge = self.m_token and users = user_list
-        todo!()
+    pub async fn send_heartbeat(&self, user_list: Value) -> bool {
+        let data: Value = json!({
+            "challenge": self.m_token.as_ref().unwrap(),
+            "users": user_list
+        });
+
+        let stat_code: u16 = match self.http_request(Method::PUT, data).await {
+            Ok(res) => res.status().as_u16(),
+            Err(err) => {
+                logger::log(LogLevel::Error, &err.to_string());
+                return false
+            },
+        };
+        if stat_code != 200 {
+            logger::log(LogLevel::Error, 
+                &format!("Heartbeat failed with code HTTP {}", stat_code));
+            return false;
+        }
+        true
     }
 
     pub fn is_registered(&self) -> bool { self.m_is_registered }
