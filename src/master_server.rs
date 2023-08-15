@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use futures::executor::block_on;
-use reqwest::{Method, StatusCode, Response, Error};
+use reqwest::{Method, Response, Error};
+use serde_json::{Value, json};
 
 use crate::config::{Config, CONF};
 use crate::logger::{LogLevel, self};
@@ -24,61 +24,73 @@ impl Client {
 
     /// Registers server on the server list
     pub fn register(&mut self) -> bool {
-        let mut data: HashMap<&str, &str> = HashMap::new();
         let conf: &Config = unsafe { CONF.as_ref().unwrap() };
 
-        let port = conf.get_listen_port().to_string();
-        let max_clients = conf.get_max_clients().to_string();
-        let password = (conf.is_public() as u32).to_string();
-
-        data.insert("ip", conf.get_ip_addr());
-        data.insert("port", &port);
-        data.insert("name", conf.get_server_name());
-        data.insert("terrain-name", conf.get_terrain_name());
-        data.insert("max-clients", &max_clients);
-        data.insert("version", "RoRnet_2.44");
-        data.insert("use-password", &password);
+        let port: String = conf.get_listen_port().to_string();
+        let max_clients: String = conf.get_max_clients().to_string();
+        let password: String = (conf.is_public() as u32).to_string();
+        let data: Value = json!({
+            "ip": conf.get_ip_addr(),
+            "port": &port,
+            "name": conf.get_server_name(),
+            "terrain-name": conf.get_terrain_name(),
+            "max-clients": &max_clients,
+            "version": "RoRnet_2.44",
+            "use-password": &password
+        });
 
         self.m_server_path = Some(format!("{}/server-list", conf.get_serverlist_path()));
         
         // Attempt to register onto the server list
         logger::log(LogLevel::Info, 
             &format!("Attempting to register on serverlist {}", self.m_server_path.as_ref().unwrap()));
-        let response = match block_on(self.http_request(Method::POST, data)) {
+        let response: Response = match block_on(self.http_request(Method::POST, data)) {
             Ok(res) => res,
             Err(err) => {
                 logger::log(LogLevel::Error, &err.to_string());
                 return false
             },
         };
-        let stat_code = response.status().as_u16();
-        let parsed: String = match block_on(response.text()) {
-            Ok(res) => res,
-            Err(_) => {
-                logger::log(LogLevel::Error, "uh oh stinky...");
-                return false;
-            },
-        };
+
+        // Try to parse a registration error
+        let stat_code: u16 = response.status().as_u16();
         if stat_code != 200 {
+            let err_json: Value  = match block_on(response.json()) {
+                Ok(res) => res,
+                Err(err) => {
+                    logger::log(LogLevel::Error, "Could not properly parse server response. Exiting...");
+                    logger::log(LogLevel::Debug, &err.to_string());
+                    return false;
+                }
+            };
             logger::log(LogLevel::Error, 
-                &format!("Registration failed, server responded with code {}", stat_code));
-            logger::log(LogLevel::Debug, &parsed);
+                &format!("HTTP {}: {}", stat_code, &err_json["message"]));
             return false;
         }
 
-        
+        // Try to parse a successful registration into a serde_json::Value
+        match block_on(response.json::<Value>()) {
+            Ok(res) => {
+                let trust_level = &res["verified-level"].as_i64();
+                let challenge = &res["challenge"].as_str();
+                if trust_level.is_none() || challenge.is_none() {
+                    logger::log(LogLevel::Error, "Registration failed. Server responded incorrectly.");
+                    logger::log(LogLevel::Debug, 
+                        &format!("Raw response: {}", &res.to_string()));
+                    return false;
+                }
 
-        // if success
-        // parse response json
-        // if (todo!() /* fail condition */) {
-        //     logger::log(LogLevel::Error,
-        //         "registration failed, invalid server response (JSON parsing failed)");
-        //     // log debug raw response
-        //     return false;
-        // }
-
-        // set trust_level and token based on response from server
-        true
+                self.m_trust_level = trust_level.unwrap() as i32;
+                self.m_token = Some(challenge.unwrap().to_string());
+                self.m_is_registered = true;
+                true
+            },
+            Err(err) => {
+                logger::log(LogLevel::Error, "Could not properly parse server response. Exiting...");
+                logger::log(LogLevel::Debug, &err.to_string());
+                false
+            },
+        }
     }
 
     pub fn unregister(&self) -> bool {
@@ -99,7 +111,7 @@ impl Client {
     async fn http_request(
         &self, 
         method: Method, 
-        payload: HashMap<&str, &str>,
+        payload: Value,
     ) -> Result<Response, Error> {
         let client: reqwest::Client = reqwest::Client::new();
         let res: Response = client

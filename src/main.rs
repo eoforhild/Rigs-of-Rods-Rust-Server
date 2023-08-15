@@ -14,7 +14,7 @@ async fn main() {
         // We know if true then CONF is not None so it's safe
         true => unsafe { &CONF.as_ref().unwrap() },
         false => {
-            // Log down failure
+            logger::log(LogLevel::Error, "Failed to parse server ini files, exiting...");
             return
         }
     };
@@ -51,7 +51,7 @@ async fn main() {
         logger::log(LogLevel::Info, &format!("Max required download: {}kbit/s", max_clients * 64));
 
         if conf.get_server_name().is_empty() {
-            logger::log(LogLevel::Error, "Server name not specified, exitting...");
+            logger::log(LogLevel::Error, "Server name not specified, exiting...");
             return;
         }
         logger::log(LogLevel::Info, &format!("Server name: {}", &conf.get_server_name()));
