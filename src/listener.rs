@@ -24,7 +24,7 @@ impl Listener {
     pub fn new(config: &Config) -> Listener {
         Listener {
             ip: "0.0.0.0".to_string(),
-            port: config.get_listen_port().to_string(),
+            port: "12456".to_string(),
             tick: 64,
             clients: Arc::new(TokioMutex::new(Vec::new()))
         }
@@ -35,8 +35,8 @@ impl Listener {
         let sock = UdpSocket::bind(&addr).await?;
         println!("Server listening on {}", addr);
 
-        let sock = Arc::new(Mutex::new(sock));
-        let signal_sock = sock.clone();
+        let sock: Arc<TokioMutex<UdpSocket>> = Arc::new(TokioMutex::new(sock));
+        let signal_sock: Arc<TokioMutex<UdpSocket>> = sock.clone();
 
         let sigint = signal::ctrl_c();
         tokio::pin!(sigint);
@@ -54,14 +54,14 @@ impl Listener {
                     println!("Received Ctrl+C, shutting down...");
                     break;
                 }
-                _ = tick_stream.next() => {
-                    self.process_tick(&sock, &sender).await?;
-                }
-                message = sender.recv() => {
-                    if let Ok(_) = message {
-                        self.process_message(&sock).await?;
-                    }
-                }
+                // _ = tick_stream.next() => {
+                //    self.process_tick(&sock, &sender).await?;
+                // }
+                // message = sender.recv() => {
+                //     if let Ok(_) = message {
+                //         self.process_message(&sock).await?;
+                //     }
+                // }
                 client_data = self.receive_client_data(&sock) => {
                     if let Ok((data, src_addr)) = client_data {
                         self.process_client_data(&sock, &src_addr, &data).await?;
@@ -72,7 +72,7 @@ impl Listener {
         Ok(())
     }
 
-    pub async fn process_tick(&self, socket: &Arc<Mutex<UdpSocket>>, sender: &broadcast::Sender<()>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn process_tick(&self, socket: &Arc<TokioMutex<UdpSocket>>, sender: &broadcast::Sender<()>) -> Result<(), Box<dyn std::error::Error>> {
         sender.send(())?;
 
         // Perform tick-based processing here
@@ -80,20 +80,20 @@ impl Listener {
         Ok(())
     }
 
-    pub async fn process_message(&self, socket: &Arc<Mutex<UdpSocket>>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn process_message(&self, socket: &Arc<TokioMutex<UdpSocket>>) -> Result<(), Box<dyn std::error::Error>> {
         // Perform message processing here
 
         Ok(())
     }
 
-    pub async fn receive_client_data(&self, socket: &Arc<Mutex<UdpSocket>>) -> Result<(Vec<u8>, std::net::SocketAddr), Box<dyn std::error::Error>> {
+    pub async fn receive_client_data(&self, socket: &Arc<TokioMutex<UdpSocket>>) -> Result<(Vec<u8>, std::net::SocketAddr), Box<dyn std::error::Error>> {
         let mut buf = [0u8; 1024];
         let (size, src_addr) = socket.lock().await.recv_from(&mut buf).await?;
         let data = buf[..size].to_vec();
         Ok((data, src_addr))
     }
 
-    pub async fn process_client_data(&self, socket: &Arc<Mutex<UdpSocket>>, src_addr: &std::net::SocketAddr, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn process_client_data(&self, socket: &Arc<TokioMutex<UdpSocket>>, src_addr: &std::net::SocketAddr, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         // Handle client data here
         // For example, update client state, send responses, etc.
 
@@ -109,12 +109,12 @@ impl Listener {
 
         // Send response
         let response = format!("Hello from server!");
-        self.send(socket, response.as_bytes(), *src_addr).await?;
+        self.send(socket, response.as_bytes().to_vec(), *src_addr).await?;
 
         Ok(())
     }
 
-    pub async fn send(&self, socket: &Arc<Mutex<UdpSocket>>, data: Vec<u8>, dest: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send(&self, socket: &Arc<TokioMutex<UdpSocket>>, data: Vec<u8>, dest: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         socket.lock().await.send_to(&data, dest).await?;
         Ok(())
     }
