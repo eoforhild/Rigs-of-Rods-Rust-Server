@@ -1,7 +1,10 @@
 pub mod config;
 pub mod logger;
 pub mod master_server;
+pub mod listener;
 
+use listener::Listener;
+use tokio::sync::broadcast;
 use config::{Config, ServerType, CONF};
 use logger::LogLevel;
 use master_server::{Client, retrieve_public_ip};
@@ -46,6 +49,9 @@ async fn main() {
         }
         logger::log(LogLevel::Info, &format!("IP Address is: {}", conf.get_ip_addr()));
 
+        // these may be outdated calculations for internet speed, probably not needed given
+        // these were made when 100 mbps internet was less common and at most people had 10-25 mbps
+        // and 1-2 mbps upload
         let max_clients: &u32 = conf.get_max_clients();
         logger::log(LogLevel::Info, &format!("Max required upload: {}kbit/s", max_clients * (max_clients - 1) * 64));
         logger::log(LogLevel::Info, &format!("Max required download: {}kbit/s", max_clients * 64));
@@ -56,7 +62,16 @@ async fn main() {
         }
         logger::log(LogLevel::Info, &format!("Server name: {}", &conf.get_server_name()));
 
+        // master server registration should be in a seperate blocking thread
         let mut master: Client = Client::new();
         master.register();
+
+        // start listener, blocking thread
+        let listener = Listener::new(conf);
+        let (sender, _) = broadcast::channel(16);
+        if let Err(err) = listener.run(sender).await {
+            eprintln!("Error occurred: {}", err);
+            // Code to handle the error
+        }
     }
 }
