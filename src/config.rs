@@ -1,7 +1,6 @@
 mod print;
 mod default;
 
-pub static RORNET_VERSION: &str = "RoRnet_2.44";
 pub static mut CONF: Option<Config> = None;
 
 pub enum ServerType {

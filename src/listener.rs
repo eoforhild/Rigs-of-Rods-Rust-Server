@@ -7,7 +7,17 @@ use tokio::time::{self, Interval, interval};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::StreamExt;
 
+use crate::net::{
+    MessageType,
+    Header,
+    ServerInfo
+};
+
 use crate::config::Config;
+use crate::logger::{
+    self,
+    LogLevel
+};
 
 pub struct Client {
     ipaddr: std::net::SocketAddr,
@@ -29,11 +39,11 @@ impl Listener {
             clients: Arc::new(TokioMutex::new(Vec::new()))
         }
     }
-    pub async fn run(&self, sender: broadcast::Sender<()>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("{}:{}", self.ip, self.port);
 
         let sock = UdpSocket::bind(&addr).await?;
-        println!("Server listening on {}", addr);
+        logger::log(LogLevel::Info, &format!("Server listening on {}", addr));
 
         let sock: Arc<TokioMutex<UdpSocket>> = Arc::new(TokioMutex::new(sock));
         let signal_sock: Arc<TokioMutex<UdpSocket>> = sock.clone();
@@ -56,11 +66,6 @@ impl Listener {
                 }
                 // _ = tick_stream.next() => {
                 //    self.process_tick(&sock, &sender).await?;
-                // }
-                // message = sender.recv() => {
-                //     if let Ok(_) = message {
-                //         self.process_message(&sock).await?;
-                //     }
                 // }
                 client_data = self.receive_client_data(&sock) => {
                     if let Ok((data, src_addr)) = client_data {
@@ -102,14 +107,25 @@ impl Listener {
         if let Some(client) = clients.iter_mut().find(|c| c.ipaddr == *src_addr) {
             // Update existing client
         } else {
-            // Add new client
-            clients.push(Client { ipaddr: *src_addr });
-            println!("New client connected: {}", src_addr);
+            // Add new client, make sure the client sends HELLO as the first packet
+            // Assuming that on first connection, the client sends just a header packet with HELLO
+            if let Ok(head) = bincode::deserialize::<Header>(data) {
+                if head.command == MessageType::Hello {
+                    clients.push(Client { ipaddr: *src_addr });
+                    println!("New client connected: {}", src_addr);
+                } else {
+                    logger::log(LogLevel::Warn, 
+                        &format!("Client with IP {} did not send a HELLO packet as its first packet", src_addr));
+                }
+            } else {
+                logger::log(LogLevel::Warn, 
+                    &format!("Client with IP {} sent a first packet that could not be parsed as a header packet", src_addr));
+            }
         }
-
-        // Send response
-        let response = format!("Hello from server!");
-        self.send(socket, response.as_bytes().to_vec(), *src_addr).await?;
+        
+        // Send a ServerInfo packet back to the client
+        let s_info: Vec<u8> = ServerInfo::build_packet();
+        self.send(socket, s_info, *src_addr).await?;
 
         Ok(())
     }

@@ -1,4 +1,6 @@
-use super::{Config, RORNET_VERSION};
+use super::Config;
+
+use crate::net::RORNET_VERSION;
 
 impl Config {
     pub fn show_help(&self) {
