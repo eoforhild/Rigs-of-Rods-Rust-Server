@@ -1,14 +1,15 @@
 use serde::{Serialize, Deserialize};
 use serde_repr::*;
+use serde_big_array::BigArray;
 
 use crate::config::{Config, CONF};
 
-pub static RORNET_MAX_PEERS: u32 = 64;
-pub static RORNET_MAX_MESSAGE_LENGTH: u32 = 8192;
-pub static RORNET_LAN_BROADCAST_PORT: u32 = 13000;
-pub static RORNET_MAX_USERNAME_LEN: u32 = 40;
+pub const RORNET_MAX_PEERS: u32 = 64;
+pub const RORNET_MAX_MESSAGE_LENGTH: u32 = 8192;
+pub const RORNET_LAN_BROADCAST_PORT: u32 = 13000;
+pub const RORNET_MAX_USERNAME_LEN: u32 = 40;
 
-pub static RORNET_VERSION: &str = "RoRnet_2.44";
+pub const RORNET_VERSION: &str = "RoRnet_2.44";
 
 /* Just RoRNet stuff all in one little module.
    Perhaps in the future move this into a messaging type of module
@@ -45,15 +46,38 @@ pub struct Header {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct ServerInfo<'a> {
-    protocol_version: &'a [u8],                 // Must be 20 bytes
-    terrain: &'a [u8],                          // Must be 128 bytes
-    server_name: &'a [u8],                      // Must be 128 bytes
-    has_password: u8,
-    info: &'a [u8],                             // Must be 4096 bytes
+pub struct ServerInfo {
+    pub protocol_version: [u8; 20],
+    #[serde(with = "BigArray")]
+    pub terrain: [u8; 128],
+    #[serde(with = "BigArray")]
+    pub server_name: [u8; 128],                    
+    pub has_password: u8,
+    #[serde(with = "BigArray")]
+    pub info: [u8; 4096],                             
 }
 
-impl ServerInfo<'_> {
+#[derive(Serialize, Deserialize)]
+pub struct UserInfo {
+    uniqueid: u32,
+    authstatus: i32,
+    slotnum: i32,
+    colournum: i32,
+
+    #[serde(with = "BigArray")] username: [u8; RORNET_MAX_USERNAME_LEN as usize],
+    #[serde(with = "BigArray")] usertoken: [u8; 40],
+    #[serde(with = "BigArray")] serverpassword: [u8; 40],
+                                language: [u8; 10],
+                                clientname: [u8; 10],
+                                clientversion: [u8; 25],
+    #[serde(with = "BigArray")] clientguid: [u8; 40],
+                                sessiontype: [u8; 10],
+    #[serde(with = "BigArray")] sessionoptions: [u8; 128],
+    
+
+}
+
+impl ServerInfo {
     pub fn build_packet() -> Vec<u8>{
         let conf: &Config = unsafe { CONF.as_ref().unwrap() };
 
@@ -69,11 +93,11 @@ impl ServerInfo<'_> {
         // TODO! Get Motd
         
         bincode::serialize(&ServerInfo {
-            protocol_version: &protocol_version,
-            terrain: &terrain,
-            server_name: &server_name,
+            protocol_version: protocol_version,
+            terrain: terrain,
+            server_name: server_name,
             has_password,
-            info: &info,
+            info: info,
         }).unwrap()
     }
 }
