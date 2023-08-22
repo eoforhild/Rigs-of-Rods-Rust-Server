@@ -42,7 +42,7 @@ pub struct Header {
     pub command: MessageType,
     pub source: i32,
     pub streamid: u32,
-    pub size: i32,
+    pub size: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,8 +77,24 @@ pub struct UserInfo {
 
 }
 
+impl Header {
+    pub fn build_packet(
+        command: MessageType,
+        source: i32,
+        streamid: u32,
+        size: u32,
+    ) -> Vec<u8> {
+        bincode::serialize(&Header {
+            command,
+            source,
+            streamid,
+            size,
+        }).unwrap()
+    }
+}
+
 impl ServerInfo {
-    pub fn build_packet() -> Vec<u8>{
+    pub fn build_packet() -> Vec<u8> {
         let conf: &Config = unsafe { CONF.as_ref().unwrap() };
 
         let mut protocol_version: [u8; 20] = [0; 20];
@@ -93,11 +109,11 @@ impl ServerInfo {
         // TODO! Get Motd
         
         bincode::serialize(&ServerInfo {
-            protocol_version: protocol_version,
-            terrain: terrain,
-            server_name: server_name,
+            protocol_version,
+            terrain,
+            server_name,
             has_password,
-            info: info,
+            info,
         }).unwrap()
     }
 }

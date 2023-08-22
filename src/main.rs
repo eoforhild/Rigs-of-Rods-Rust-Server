@@ -63,7 +63,7 @@ async fn main() {
         // master.register();
 
         // start listener, blocking thread
-        let listener = Listener::new(conf);
+        let listener = Listener::new();
         if let Err(err) = listener.run().await {
             eprintln!("Error occurred: {}", err);
             // Code to handle the error

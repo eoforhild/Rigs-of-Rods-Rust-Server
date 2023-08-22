@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::str;
@@ -12,7 +13,8 @@ use crate::net::{
     self,
     MessageType,
     Header,
-    ServerInfo
+    ServerInfo,
+    RORNET_VERSION
 };
 
 use crate::config::Config;
@@ -35,16 +37,16 @@ pub struct Listener {
     ip: String,
     port: String,
     tick: u64,
-    clients: Arc<TokioMutex<Vec<Client>>>,
+    clients: Arc<TokioMutex<HashMap<std::net::SocketAddr , Client>>>,
 }
 
 impl Listener {
-    pub fn new(config: &Config) -> Listener {
+    pub fn new() -> Listener {
         Listener {
             ip: "0.0.0.0".to_string(),
             port: "12456".to_string(),
             tick: 64,
-            clients: Arc::new(TokioMutex::new(Vec::new()))
+            clients: Arc::new(TokioMutex::new(HashMap::new()))
         }
     }
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -76,7 +78,7 @@ impl Listener {
                 // }
                 client_data = self.receive_client_data(&sock) => {
                     if let Ok((data, src_addr)) = client_data {
-                        self.process_client_data(&sock, &src_addr, &data).await?;
+                        self.process_client_data(&sock, src_addr, &data).await?;
                     }
                 }
             }
@@ -106,58 +108,88 @@ impl Listener {
         Ok((data, src_addr))
     }
 
-    pub async fn process_client_data(&self, socket: &Arc<TokioMutex<UdpSocket>>, src_addr: &std::net::SocketAddr, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn process_client_data(&self, socket: &Arc<TokioMutex<UdpSocket>>, src_addr: std::net::SocketAddr, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         // Handle client data here
         // For example, update client state, send responses, etc.
         // Make sure client sent a packet at least the size of header
         if data.len() < 16 {
-            return Err("Packet smaller than header size".into());
+            logger::log(LogLevel::Debug,
+                &format!("Client {} sent a non-RoRnet packet. Ignoring...", &src_addr));
+            return Ok(());
         }
         let (head_raw, payload_raw) = (&data[..16], &data[16..]);
-        let head = bincode::deserialize::<Header>(head_raw).unwrap();
+        let head = match bincode::deserialize::<Header>(head_raw) {
+            Ok(res) => res,
+            Err(_) => {
+                logger::log(LogLevel::Debug,
+                &format!("Client {} sent a non-RoRnet packet. Ignoring...", &src_addr));
+                return Ok(());
+            },
+        };
 
         // Add or update client in the clients list
-        /* TODO! Maybe use a hashmap instead for quicker access? Client list isn't going to be
-            that large so memory shouldn't be an issue */
         let mut clients = self.clients.lock().await;
-        if let Some(client) = clients.iter_mut().find(|c| c.ipaddr == *src_addr) {
+        if let Some(client) = clients.get_mut(&src_addr) {
             // Update existing client
             match client.state {
                 ClientState::Pending => {
                     if head.command == MessageType::UserInfo {
                         client.state = ClientState::Connected;
                         logger::log(LogLevel::Debug, 
-                            &format!("Client {} moved from pending to connected", &client.ipaddr.to_string()));
+                            &format!("Client {} moved from pending to connected", src_addr));
                         // Update the client struct with stuff idk
+                    } else {
+                        logger::log(LogLevel::Debug,
+                            &format!("Client {} did not respond with a UserInfo packet, dropping connection...", src_addr));
+                        clients.remove(&src_addr);
                     }
                 },
                 ClientState::Connected => {
                     // Actually do the client stuff in game here
                 },
-            };
-        } else {
-            // Add new client, make sure the client sends HELLO as the first packet
-            if head.command == MessageType::Hello {
-                // Create a new client in the Pending state
-                clients.push(Client { state: ClientState::Pending, ipaddr: *src_addr });
-                logger::log(LogLevel::Debug, &format!("New client in pending: {}", src_addr));
-                // Sends a ServerInfo packet back to the client
-                let s_info: Vec<u8> = ServerInfo::build_packet();
-                self.send(socket, s_info, *src_addr).await?;
-            } else {
-                logger::log(LogLevel::Warn, 
-                    &format!("Client with IP {} did not send a HELLO packet as its first packet", src_addr));
             }
+        } else {
+            // Make sure the client sends HELLO as the first packet
+            if head.command != MessageType::Hello {
+                logger::log(LogLevel::Warn, 
+                    &format!("Client {} did not send a HELLO packet as its first packet", src_addr));
+                self.send(socket, MessageType::WrongVer, 0, 0, vec![], src_addr).await?;
+                return Ok(());
+            }
+            if buf_to_str(&payload_raw) != RORNET_VERSION {
+                logger::log(LogLevel::Warn, 
+                    &format!("Client {} had wrong protocol version", src_addr));
+                self.send(socket, MessageType::WrongVer, 0, 0, vec![], src_addr).await?;
+                return Ok(());
+            }
+            // Creates a new client in the Pending state
+            clients.insert(src_addr, Client { state: ClientState::Pending, ipaddr: src_addr });
+            logger::log(LogLevel::Debug, &format!("New client in pending: {}", src_addr));
+            // Sends a ServerInfo packet back to the client
+            let s_info: Vec<u8> = ServerInfo::build_packet();
+            self.send(socket, MessageType::Hello, 0, 0, s_info, src_addr).await?;
         }
         Ok(())
     }
 
-    pub async fn send(&self, socket: &Arc<TokioMutex<UdpSocket>>, data: Vec<u8>, dest: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-        socket.lock().await.send_to(&data, dest).await?;
+    // Sends a payload with specified command. Make payload using build_packet
+    // functions in net.rs
+    pub async fn send(
+        &self,
+        socket: &Arc<TokioMutex<UdpSocket>>,
+        command: MessageType,
+        source: i32,
+        streamid: u32,
+        mut payload: Vec<u8>,
+        dest: std::net::SocketAddr
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut msg: Vec<u8> = Header::build_packet(command, source, streamid, payload.len() as u32);
+        msg.append(&mut payload);
+        socket.lock().await.send_to(&msg, dest).await?;
         Ok(())
     }
+}
 
-    fn buf_to_str(buf: &[u8]) -> &str {
-        str::from_utf8(buf).unwrap()
-    }
+fn buf_to_str(buf: &[u8]) -> &str {
+    str::from_utf8(buf).unwrap()
 }
